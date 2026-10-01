@@ -50,6 +50,12 @@ raisons des choix du Dockerfile.
   endpoint est lue une seule fois, dans `buildAuthSession`
   (`html/oidc/core.js` de kyber-web), puis réutilisée pour l'échange et le
   renouvellement : c'est là qu'il faut la remplacer par celle du relais.
+  Pour garder ce patch hors du dépôt, sans modifier ses fichiers : ajouter
+  une étape au-dessus de la cible `web` qui applique le patch et relance
+  `./build-wasm.sh`, puis une étape au-dessus de `steam` (ou `desktop`) qui
+  y recopie `/src/kyber-web/html` dans `/opt/kyber/webclient`. Docker n'ayant
+  pas d'inclusion de Dockerfile, on concatène `Dockerfile` et ces étapes dans
+  un fichier non versionné, construit avec `docker build -f`.
 
 ## Steam et GPU
 
