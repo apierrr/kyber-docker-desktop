@@ -162,7 +162,9 @@ getent group video render      # reporter les numéros dans VIDEO_GID et RENDER_
 ```
 
 Puis dans `.env`, décommenter `COMPOSE_FILE=docker-compose.yml:docker-compose.steam.yml`
-et lancer `docker compose up -d --build`. Steam est dans le menu Applications,
+et lancer `docker compose up -d --build`. Avec `COMPOSE_FILE`, un
+`docker-compose.override.yml` n'est plus chargé automatiquement : s'il existe,
+l'ajouter à la fin de la liste. Steam est dans le menu Applications,
 Jeux. Pour installer les jeux hors du conteneur, ajouter `/home/kyber/SteamLibrary`
 dans Steam > Paramètres > Stockage et le définir par défaut.
 
