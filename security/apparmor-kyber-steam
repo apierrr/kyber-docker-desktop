@@ -21,7 +21,12 @@ profile kyber-steam flags=(attach_disconnected,mediate_deleted) {
   pivot_root,
   userns,
 
+  # Comme docker-default : signaux de l'hôte, de runc/crun ("docker stop") et
+  # entre processus du conteneur. Sans peer=runc, Ubuntu (runc confiné) refuse
+  # l'arrêt et Docker finit par tout tuer.
   signal (receive) peer=unconfined,
+  signal (receive) peer=runc,
+  signal (receive) peer=crun,
   signal (send,receive) peer=kyber-steam,
   ptrace (trace,read,tracedby,readby) peer=kyber-steam,
 
