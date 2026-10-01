@@ -1,0 +1,4 @@
+# Données et réglages locaux
+data/
+.env
+docker-compose.override.yml

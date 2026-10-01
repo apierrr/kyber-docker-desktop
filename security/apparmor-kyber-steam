@@ -1,0 +1,36 @@
+# Profil AppArmor du conteneur Steam : celui de Docker (docker-default), plus
+# les montages et les user namespaces dont le bac à sable de Proton
+# (pressure-vessel, bwrap) a besoin. L'ABI 4.0 est indispensable : en 3.0,
+# la règle "userns" est ignorée et Ubuntu retire les capacités dans le
+# namespace.
+#
+# Installation (une fois, rechargé ensuite à chaque démarrage) :
+#   sudo cp security/apparmor-kyber-steam /etc/apparmor.d/kyber-steam
+#   sudo apparmor_parser -r -W /etc/apparmor.d/kyber-steam
+abi <abi/4.0>,
+include <tunables/global>
+
+profile kyber-steam flags=(attach_disconnected,mediate_deleted) {
+  include <abstractions/base>
+
+  network,
+  capability,
+  file,
+  mount,
+  umount,
+  pivot_root,
+  userns,
+
+  signal (receive) peer=unconfined,
+  signal (send,receive) peer=kyber-steam,
+  ptrace (trace,read,tracedby,readby) peer=kyber-steam,
+
+  deny @{PROC}/* w,
+  deny @{PROC}/sys/[^k]** w,
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+}

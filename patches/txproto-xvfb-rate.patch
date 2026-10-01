@@ -1,0 +1,15 @@
+diff --git a/src/iosys_xcb.c b/src/iosys_xcb.c
+index aa600db..0a34e72 100644
+--- a/src/iosys_xcb.c
++++ b/src/iosys_xcb.c
+@@ -479,7 +479,9 @@ static AVRational get_monitor_rate(XCBCtx *ctx, xcb_window_t root,
+     xcb_randr_mode_info_t *modes = xcb_randr_get_screen_resources_modes(resources_r);
+     for (int i = 0; i < xcb_randr_get_screen_resources_modes_length(resources_r); i++) {
+         if (active_mode == modes[i].id) {
+-            rate = av_make_q(modes[i].dot_clock, modes[i].htotal * modes[i].vtotal);
++            /* Xvfb and other virtual outputs report modes without timings */
++            if (modes[i].dot_clock && modes[i].htotal && modes[i].vtotal)
++                rate = av_make_q(modes[i].dot_clock, modes[i].htotal * modes[i].vtotal);
+ 
+             sp_log(ctx, SP_LOG_DEBUG, "Found rate %d/%d (%f) for monitor \"%s\"\n",
+                    rate.num, rate.den, av_q2d(rate), mon_name);

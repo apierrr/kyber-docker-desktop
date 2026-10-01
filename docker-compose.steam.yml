@@ -1,0 +1,23 @@
+# Ajoute Steam au bureau. Prérequis et explications : README, section Steam.
+# Activer avec COMPOSE_FILE=docker-compose.yml:docker-compose.steam.yml dans .env
+services:
+  kyber:
+    build:
+      target: steam
+    image: kyber-desktop-steam
+    # GPU de l'hôte : card0 pour VirtualGL (groupe video), renderD128 pour
+    # Vulkan (groupe render)
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${VIDEO_GID:-44}"
+      - "${RENDER_GID:-992}"
+    # Bac à sable de Proton (bwrap) : user namespaces et montages, qu'aucun
+    # des profils par défaut de Docker n'autorise
+    security_opt:
+      - seccomp=./security/seccomp-steam.json
+      - apparmor=kyber-steam
+      - systempaths=unconfined
+    volumes:
+      - ${STEAM_LIBRARY:-./data/steam-library}:/home/kyber/SteamLibrary
+    shm_size: 2g

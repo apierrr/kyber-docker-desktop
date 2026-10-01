@@ -1,0 +1,263 @@
+diff --git a/kynput/src/linux/host_keyboard.rs b/kynput/src/linux/host_keyboard.rs
+index c1ee2e0..bd95d2b 100644
+--- a/kynput/src/linux/host_keyboard.rs
++++ b/kynput/src/linux/host_keyboard.rs
+@@ -20,12 +20,11 @@
+ 
+ use std::sync::Arc;
+ 
+-use evdev_rs::{InputEvent as EvdevEvent, TimeVal, UInputDevice, enums::*};
+ use log::{error, warn};
++use xcb;
++use xcb::Xid;
+ 
+-use crate::linux::uinput_generated::keyboard::DESC;
+ use crate::linux::utils::keycode_convert::scancode_to_keycode;
+-use crate::linux::utils::uinput_utils::plug_device;
+ use crate::pipeline::{InputConsumerHandle, InputHandler};
+ use crate::utils::threaded_consumer::{ThreadedConsumer, ThreadedConsumerBackend};
+ use crate::{Error, Result};
+@@ -34,8 +33,11 @@ use crate::{
+     InputType, KeyboardKey, Payload,
+ };
+ 
++// Keys are injected with XTest into the X server of $DISPLAY instead of a
++// uinput device, so that a containerized virtual display receives them and the
++// host kernel (and its VTs) never does.
+ struct Backend {
+-    device: UInputDevice,
++    conn: xcb::Connection,
+     device_name: &'static str,
+     listener: Option<Box<dyn InputEventListener + Send>>,
+ }
+@@ -45,7 +47,7 @@ impl Backend {
+         device_name: &'static str,
+         config: HostKeyboardConfig,
+     ) -> Result<Box<dyn ThreadedConsumerBackend>> {
+-        let device = plug_device(device_name, &DESC)?;
++        let (conn, _) = xcb::Connection::connect(None)?;
+ 
+         if let Some(listener) = &config.listener {
+             listener.on_event(&InputEvent {
+@@ -57,15 +59,13 @@ impl Backend {
+         }
+ 
+         Ok(Box::new(Self {
+-            device,
++            conn,
+             device_name,
+             listener: config.listener,
+         }))
+     }
+ 
+     fn inject_key(&self, key: &KeyboardKey) -> Result<()> {
+-        let ts = TimeVal::new(0, 0);
+-
+         // Scancode conversion => Linux keycode. Check KeyboardKey's
+         // documentation for more details.
+         let keycode = if let Some(keycode) = scancode_to_keycode(key.scancode) {
+@@ -75,18 +75,28 @@ impl Backend {
+             return Ok(());
+         };
+ 
+-        let ev_code = if let Some(ev_key) = int_to_ev_key(keycode.into()) {
+-            EventCode::EV_KEY(ev_key)
+-        } else {
+-            warn!("Ignore invalid scancode {}", key.scancode);
++        // X keycodes are evdev keycodes shifted by 8 (xkb "evdev" rules)
++        let Ok(detail) = u8::try_from(keycode + 8) else {
++            warn!("Ignore out of range keycode {}", keycode);
+             return Ok(());
+         };
+ 
+-        let sys_event = EvdevEvent::new(&ts, &ev_code, key.pressed as i32);
+-        self.device.write_event(&sys_event)?;
++        let r#type = if key.pressed {
++            x11::xlib::KeyPress
++        } else {
++            x11::xlib::KeyRelease
++        };
+ 
+-        let sys_event = EvdevEvent::new(&ts, &EventCode::EV_SYN(EV_SYN::SYN_REPORT), 0);
+-        self.device.write_event(&sys_event)?;
++        self.conn.send_request(&xcb::xtest::FakeInput {
++            r#type: r#type as _,
++            detail,
++            time: 0,
++            root: xcb::x::Window::none(),
++            root_x: 0,
++            root_y: 0,
++            deviceid: 0,
++        });
++        self.conn.flush()?;
+ 
+         Ok(())
+     }
+diff --git a/kynput/src/linux/host_mouse.rs b/kynput/src/linux/host_mouse.rs
+index 06f305c..9788be5 100644
+--- a/kynput/src/linux/host_mouse.rs
++++ b/kynput/src/linux/host_mouse.rs
+@@ -20,11 +20,9 @@
+ 
+ use std::sync::Arc;
+ 
+-use evdev_rs::{InputEvent as EvdevEvent, TimeVal, UInputDevice, enums::*};
+ use log::error;
+-
+-use crate::linux::uinput_generated::mouse::DESC;
+-use crate::linux::utils::uinput_utils::plug_device;
++use xcb;
++use xcb::Xid;
+ use crate::pipeline::{InputConsumerHandle, InputHandler};
+ use crate::utils::threaded_consumer::{ThreadedConsumer, ThreadedConsumerBackend};
+ use crate::{Error, Result};
+@@ -34,8 +32,10 @@ use crate::{
+ };
+ use crate::{MouseButton, MouseButtonType, MouseMove, MouseWheel};
+ 
++// Mouse events are injected with XTest into the X server of $DISPLAY instead
++// of a uinput device, so that a containerized virtual display receives them.
+ pub struct Backend {
+-    device: UInputDevice,
++    conn: xcb::Connection,
+ 
+     device_name: &'static str,
+     listener: Option<Box<dyn InputEventListener + Send>>,
+@@ -49,7 +49,7 @@ impl Backend {
+         device_name: &'static str,
+         config: HostMouseConfig,
+     ) -> Result<Box<dyn ThreadedConsumerBackend>> {
+-        let device = plug_device(device_name, &DESC)?;
++        let (conn, _) = xcb::Connection::connect(None)?;
+ 
+         if let Some(listener) = &config.listener {
+             listener.on_event(&InputEvent {
+@@ -61,7 +61,7 @@ impl Backend {
+         }
+ 
+         Ok(Box::new(Self {
+-            device,
++            conn,
+             device_name,
+             listener: config.listener,
+             accumulated_dx: 0.0,
+@@ -69,62 +69,61 @@ impl Backend {
+         }))
+     }
+ 
++    fn fake_input(&self, r#type: i32, detail: u8, root_x: i16, root_y: i16) {
++        self.conn.send_request(&xcb::xtest::FakeInput {
++            r#type: r#type as _,
++            detail,
++            time: 0,
++            root: xcb::x::Window::none(),
++            root_x,
++            root_y,
++            deviceid: 0,
++        });
++    }
++
+     fn inject_button(&self, event: &MouseButton) -> Result<()> {
+-        let ts = TimeVal::new(0, 0);
+-
+-        let ev_key = match event.button {
+-            MouseButtonType::Left => EV_KEY::BTN_LEFT,
+-            MouseButtonType::Middle => EV_KEY::BTN_MIDDLE,
+-            MouseButtonType::Right => EV_KEY::BTN_RIGHT,
+-            MouseButtonType::Side => EV_KEY::BTN_SIDE,
+-            MouseButtonType::Extra => EV_KEY::BTN_EXTRA,
++        let button = match event.button {
++            MouseButtonType::Left => 1,
++            MouseButtonType::Middle => 2,
++            MouseButtonType::Right => 3,
++            MouseButtonType::Side => 8,
++            MouseButtonType::Extra => 9,
+         };
+ 
+-        let ev_code = EventCode::EV_KEY(ev_key);
+-
+-        let sys_event = EvdevEvent::new(&ts, &ev_code, event.pressed as i32);
+-        self.device.write_event(&sys_event)?;
++        let r#type = if event.pressed {
++            x11::xlib::ButtonPress
++        } else {
++            x11::xlib::ButtonRelease
++        };
+ 
+-        let sys_event = EvdevEvent::new(&ts, &EventCode::EV_SYN(EV_SYN::SYN_REPORT), 0);
+-        self.device.write_event(&sys_event)?;
++        self.fake_input(r#type, button, 0, 0);
++        self.conn.flush()?;
+ 
+         Ok(())
+     }
+ 
+     fn inject_move(&self, event: &MouseMove) -> Result<()> {
+-        let ts = TimeVal::new(0, 0);
+-
+-        if event.dx != 0 {
+-            let ev_code = EventCode::EV_REL(EV_REL::REL_X);
+-
+-            let sys_event = EvdevEvent::new(&ts, &ev_code, event.dx.into());
+-            self.device.write_event(&sys_event)?;
+-
+-            let sys_event = EvdevEvent::new(&ts, &EventCode::EV_SYN(EV_SYN::SYN_REPORT), 0);
+-            self.device.write_event(&sys_event)?;
++        if event.dx == 0 && event.dy == 0 {
++            return Ok(());
+         }
+ 
+-        if event.dy != 0 {
+-            let ev_code = EventCode::EV_REL(EV_REL::REL_Y);
+-
+-            let sys_event = EvdevEvent::new(&ts, &ev_code, event.dy.into());
+-            self.device.write_event(&sys_event)?;
+-
+-            let sys_event = EvdevEvent::new(&ts, &EventCode::EV_SYN(EV_SYN::SYN_REPORT), 0);
+-            self.device.write_event(&sys_event)?;
+-        }
++        // detail = 1: root_x/root_y are relative to the current position
++        self.fake_input(x11::xlib::MotionNotify, 1, event.dx, event.dy);
++        self.conn.flush()?;
+ 
+         Ok(())
+     }
+ 
+-    fn uinput_inject_wheel(&self, ev_code: EventCode, value: i32) -> Result<()> {
+-        let ts = TimeVal::new(0, 0);
+-
+-        let sys_event = EvdevEvent::new(&ts, &ev_code, value);
+-        self.device.write_event(&sys_event)?;
++    // One click of the X wheel buttons (4 up, 5 down, 6 left, 7 right) per
++    // notch, the sign following the uinput REL_WHEEL/REL_HWHEEL convention.
++    fn inject_wheel_clicks(&self, button_pos: u8, button_neg: u8, value: i32) -> Result<()> {
++        let button = if value > 0 { button_pos } else { button_neg };
+ 
+-        let sys_event = EvdevEvent::new(&ts, &EventCode::EV_SYN(EV_SYN::SYN_REPORT), 0);
+-        self.device.write_event(&sys_event)?;
++        for _ in 0..value.unsigned_abs() {
++            self.fake_input(x11::xlib::ButtonPress, button, 0, 0);
++            self.fake_input(x11::xlib::ButtonRelease, button, 0, 0);
++        }
++        self.conn.flush()?;
+ 
+         Ok(())
+     }
+@@ -155,7 +154,7 @@ impl Backend {
+             let sign = if self.accumulated_dx >= 1.0 { 1 } else { -1 };
+ 
+             self.accumulated_dx = remain;
+-            self.uinput_inject_wheel(EventCode::EV_REL(EV_REL::REL_HWHEEL), sign * count)?;
++            self.inject_wheel_clicks(7, 6, sign * count)?;
+         }
+ 
+         // Y axis
+@@ -163,7 +162,7 @@ impl Backend {
+             let sign = if self.accumulated_dy >= 1.0 { -1 } else { 1 };
+ 
+             self.accumulated_dy = remain;
+-            self.uinput_inject_wheel(EventCode::EV_REL(EV_REL::REL_WHEEL), sign * count)?;
++            self.inject_wheel_clicks(4, 5, sign * count)?;
+         }
+ 
+         Ok(())

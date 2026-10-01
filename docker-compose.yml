@@ -1,0 +1,43 @@
+# Bureau Linux (XFCE) dans le navigateur avec Kyber.
+# Réglages dans .env (voir .env.example). Ce qui est propre à une machine va
+# dans un docker-compose.override.yml, ignoré par git. Pour Steam, ajouter
+# docker-compose.steam.yml (voir README).
+services:
+  kyber:
+    build:
+      context: .
+      target: desktop
+      args:
+        LOCALE: ${LOCALE:-fr_FR.UTF-8}
+    image: kyber-desktop
+    container_name: kyber
+    restart: unless-stopped
+    # Page en TCP, flux en QUIC sur UDP : même port des deux côtés et à
+    # l'intérieur, le client déduit l'adresse du flux de celle de la page
+    ports:
+      - "${KYBER_PORT:-8090}:${KYBER_PORT:-8090}/tcp"
+      - "${KYBER_PORT:-8090}:${KYBER_PORT:-8090}/udp"
+    environment:
+      - TZ=${TZ:-Europe/Paris}
+      - KYBER_PORT=${KYBER_PORT:-8090}
+      - SCREEN_RESOLUTION=${SCREEN_RESOLUTION:-1920x1080}
+      - KYBER_ENCODER=${KYBER_ENCODER:-x264}
+      - KEYBOARD_LAYOUT=${KEYBOARD_LAYOUT:-fr}
+      - KEYBOARD_VARIANT=${KEYBOARD_VARIANT:-}
+      - KYBER_TLS_SAN=${KYBER_TLS_SAN:-IP:127.0.0.1}
+      - KYBER_BASIC_AUTH=${KYBER_BASIC_AUTH:-true}
+      - KYBER_USER=${KYBER_USER:-}
+      - KYBER_PASSWORD=${KYBER_PASSWORD:-}
+      - KYBER_OIDC_ISSUER=${KYBER_OIDC_ISSUER:-}            # connexion OIDC, vide = désactivée
+      - KYBER_OIDC_CLIENT_ID=${KYBER_OIDC_CLIENT_ID:-}
+      - KYBER_OIDC_ALLOWED_EMAILS=${KYBER_OIDC_ALLOWED_EMAILS:-}
+    volumes:
+      - ./data/home:/home/kyber
+    shm_size: 1g
+    cpus: ${CPUS:-4}
+    # txproto journalise une erreur DRM par seconde quand /dev/dri est présent
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
