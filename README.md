@@ -58,9 +58,10 @@ docker compose up -d --build
 - Client natif de Kyber (installeur Windows dans
   [kyber-installer](https://gitlab.com/kyber/apps/kyber-installer), à compiler
   pour Linux et macOS) : il s'installe sur la machine cliente et se connecte au
-  même port, avec `--username` pour les
-  identifiants et `--tls-tofu` pour retenir le certificat auto-signé à la
-  première connexion.
+  même port (`--port`), avec `--tls-tofu` pour retenir le certificat auto-signé
+  à la première connexion. Connexion par identifiants (`--auth-username`,
+  `--auth-password`) ou par jeton signé (`--auth-token`, voir
+  [Connexion](#connexion)).
 
 ## Réglages (`.env`)
 
@@ -69,6 +70,7 @@ docker compose up -d --build
 | `KYBER_USER`, `KYBER_PASSWORD` | vide | Identifiants de connexion |
 | `KYBER_BASIC_AUTH` | `true` | Connexion par identifiants (`false` si OIDC seul) |
 | `KYBER_OIDC_*` | vide | Connexion OIDC, voir [Connexion](#connexion) |
+| `KYBER_JWT_PUBLIC_KEY_FILE` | vide | Connexion par jeton signé, voir [Connexion](#connexion) |
 | `KYBER_PORT` | `8090` | Port de la page (TCP) et du flux (UDP) |
 | `SCREEN_RESOLUTION` | `1920x1080` | Taille de l'écran virtuel |
 | `KYBER_ENCODER` | `x264` | Encodeur vidéo (`vaapi` est expérimental dans Kyber) |
@@ -114,6 +116,29 @@ Le client web fait l'échange de jetons depuis le navigateur : le fournisseur
 doit accepter les requêtes CORS sur son token endpoint. C'est le cas de
 Keycloak ou d'Authentik, pas de Cloudflare Access, qui n'envoie aucun en-tête
 CORS et demande un relais (voir [docs/NOTES.md](docs/NOTES.md#connexion)).
+
+### Jeton signé (JWT)
+
+Pratique pour le client natif : un jeton signé par une clé privée RSA, vérifié
+par le serveur avec la clé publique. Sans la clé privée, impossible d'en
+fabriquer un ; la clé privée n'a pas à rester sur le serveur.
+
+```bash
+# Paire de clés et jeton (ici valable un an), avec l'outil livré par Kyber
+docker compose exec -u kyber kyber jwt-gen keys --algorithm RS256 --output-dir /tmp/jwt
+docker compose exec -u kyber kyber jwt-gen token --algorithm RS256 \
+    --key-path /tmp/jwt/jwt-private.pem --sub vous --exp 365d
+docker compose exec -u kyber kyber sh -c \
+    'mv /tmp/jwt/jwt-public.pem ~/.config/kyber/ && rm -r /tmp/jwt'
+```
+
+Puis `KYBER_JWT_PUBLIC_KEY_FILE=/home/kyber/.config/kyber/jwt-public.pem` dans
+`.env`, `docker compose up -d`, et côté client `--auth-token <jeton>`. Refaire
+une paire de clés invalide tous les jetons précédents.
+
+Le client natif sait aussi faire de l'OIDC, mais il reçoit la réponse du
+fournisseur sur `http://127.0.0.1` avec un port tiré au hasard : un fournisseur
+qui exige l'adresse de retour exacte (Cloudflare Access, par exemple) le refuse.
 
 ## Accès à distance
 

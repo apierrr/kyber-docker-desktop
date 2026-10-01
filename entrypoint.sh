@@ -26,8 +26,8 @@ BASIC_AUTH="${KYBER_BASIC_AUTH:-true}"
 if [ "$BASIC_AUTH" = true ]; then
     : "${KYBER_USER:?KYBER_USER manquant (voir .env.example)}"
     : "${KYBER_PASSWORD:?KYBER_PASSWORD manquant (voir .env.example)}"
-elif [ -z "${KYBER_OIDC_ISSUER:-}" ]; then
-    echo "Aucune méthode de connexion : KYBER_BASIC_AUTH=true ou KYBER_OIDC_* (voir .env.example)" >&2
+elif [ -z "${KYBER_OIDC_ISSUER:-}" ] && [ -z "${KYBER_JWT_PUBLIC_KEY_FILE:-}" ]; then
+    echo "Aucune méthode de connexion : KYBER_BASIC_AUTH=true, KYBER_OIDC_* ou KYBER_JWT_PUBLIC_KEY_FILE (voir .env.example)" >&2
     exit 1
 fi
 
@@ -58,7 +58,6 @@ toml_list() {
     printf '[ %s ]' "$out"
 }
 
-# JWT est actif par défaut dans Kyber avec une clé de développement publique
 cat > "$RUN_DIR/kyber_config.toml" <<EOF
 [kyavserver]
 encoder = "$ENCODER"
@@ -74,9 +73,24 @@ tls_key = "$TLS_DIR/key.pem"
 trusted_origins = []
 same_site = true
 
-[kycontroller.auth.jwt]
-enabled = false
 EOF
+
+# Jetons signés (JWT), surtout pour le client natif. Kyber l'active par défaut
+# avec une clé de développement publique : désactivé, sauf clé publique RSA
+# fournie (RS256 : seul le détenteur de la clé privée peut signer un jeton).
+if [ -n "${KYBER_JWT_PUBLIC_KEY_FILE:-}" ]; then
+    [ -s "$KYBER_JWT_PUBLIC_KEY_FILE" ] || {
+        echo "KYBER_JWT_PUBLIC_KEY_FILE : clé introuvable ($KYBER_JWT_PUBLIC_KEY_FILE)" >&2; exit 1; }
+    cat >> "$RUN_DIR/kyber_config.toml" <<EOF
+
+[kycontroller.auth.jwt]
+enabled = true
+algorithm = "RS256"
+key = { file = $(toml_str "$KYBER_JWT_PUBLIC_KEY_FILE") }
+EOF
+else
+    printf '\n[kycontroller.auth.jwt]\nenabled = false\n' >> "$RUN_DIR/kyber_config.toml"
+fi
 
 # Connexion par identifiants (par défaut)
 if [ "$BASIC_AUTH" = true ]; then
