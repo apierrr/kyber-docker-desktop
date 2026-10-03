@@ -156,7 +156,7 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 
 # ---------------------------------------------------------------------------
 # Steam : client 32 bits (dépôt contrib), pilotes Mesa OpenGL et Vulkan en
-# 64 et 32 bits, VirtualGL pour les jeux OpenGL
+# 64 et 32 bits, VirtualGL pour les applications OpenGL hors Steam
 # ---------------------------------------------------------------------------
 FROM desktop AS steam
 USER root

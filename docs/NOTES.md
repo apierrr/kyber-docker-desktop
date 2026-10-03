@@ -62,8 +62,14 @@ raisons des choix du Dockerfile.
 - Xvfb n'a ni DRI3 ni accélération. Vulkan (Mesa) refuse alors de présenter
   sur le GPU et retombe sur llvmpipe ; `MESA_VK_WSI_DEBUG=sw` force une
   présentation par copie en mémoire, le rendu restant sur le GPU.
-- OpenGL passe par VirtualGL, avec le back-end EGL sur `/dev/dri/card0`
-  (`renderD128` est refusé : "Invalid EGL device").
+- Hors Steam, OpenGL passe par VirtualGL, avec le back-end EGL sur
+  `/dev/dri/card0` (`renderD128` est refusé : "Invalid EGL device").
+- Les jeux Linux natifs lancés par Steam tournent dans pressure-vessel (Steam
+  Linux Runtime). `vglrun` y échoue ("libXv.so.1: cannot open shared object
+  file") et, sans rien, le jeu tourne en llvmpipe. Zink fait passer leur
+  OpenGL par Vulkan, donc par le GPU ; options de lancement :
+  `LIBGL_KOPPER_DRI2=1 MESA_LOADER_DRIVER_OVERRIDE=zink %command%`.
+  Sans `LIBGL_KOPPER_DRI2=1`, Zink ne trouve aucun visuel GLX sous Xvfb.
 - Ne pas lancer Steam sous VirtualGL : son interface (steamwebhelper) tourne
   dans le conteneur pressure-vessel, où le faker de VirtualGL ne trouve pas ses
   extensions et la fait planter en boucle.
